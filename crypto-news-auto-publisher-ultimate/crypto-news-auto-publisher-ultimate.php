@@ -26,6 +26,9 @@ class CryptoNewsAutoPublisherUltimate {
 
         add_action('wp_ajax_manual_publish', array($this, 'manual_publish'));
         add_action('wp_ajax_test_price_news', array($this, 'test_price_news'));
+
+        // Если миниатюра не установлена, используем первое изображение из контента поста
+        add_filter('post_thumbnail_html', array($this, 'fallback_thumbnail_from_content'), 10, 5);
     }
 
     public function activate() {
@@ -469,8 +472,16 @@ class CryptoNewsAutoPublisherUltimate {
             return false;
         }
 
+        $parsed_url = wp_parse_url($image_url, PHP_URL_PATH);
+        $file_name = $parsed_url ? wp_basename($parsed_url) : '';
+
+        if (empty($file_name) || !preg_match('/\.(jpe?g|png|gif|webp)$/i', $file_name)) {
+            $slug = sanitize_title($image_name);
+            $file_name = !empty($slug) ? $slug . '.jpg' : 'crypto-image-' . $post_id . '.jpg';
+        }
+
         $file_array = array(
-            'name'     => basename($image_url),
+            'name'     => $file_name,
             'tmp_name' => $tmp
         );
 
@@ -495,6 +506,33 @@ class CryptoNewsAutoPublisherUltimate {
         }
 
         return $category->term_id;
+    }
+
+    public function fallback_thumbnail_from_content($html, $post_id, $post_thumbnail_id, $size, $attr) {
+        if (!empty($html) || !is_numeric($post_id)) {
+            return $html;
+        }
+
+        $post = get_post((int) $post_id);
+        if (!$post || empty($post->post_content)) {
+            return $html;
+        }
+
+        if (!preg_match('/<img[^>]+src=["\']([^"\']+)["\']/i', $post->post_content, $matches)) {
+            return $html;
+        }
+
+        $image_src = esc_url($matches[1]);
+        if (empty($image_src)) {
+            return $html;
+        }
+
+        $classes = 'attachment-post-thumbnail size-post-thumbnail wp-post-image';
+        if (is_array($attr) && !empty($attr['class'])) {
+            $classes .= ' ' . sanitize_html_class($attr['class']);
+        }
+
+        return '<img src="' . $image_src . '" class="' . esc_attr($classes) . '" alt="' . esc_attr(get_the_title($post_id)) . '" loading="lazy" />';
     }
 
     // AJAX обработчики
