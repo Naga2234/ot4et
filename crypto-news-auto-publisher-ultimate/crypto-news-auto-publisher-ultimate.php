@@ -280,6 +280,24 @@ class CryptoNewsAutoPublisherUltimate {
             $content .= '<tr style="background: #f8f9fa;"><td style="padding: 15px; border: 1px solid #dee2e6;"><strong>📉 24h Low</strong></td><td style="padding: 15px; border: 1px solid #dee2e6;">$' . number_format($coin['low_24h'], $price < 1 ? 6 : 2) . '</td></tr>';
         }
         $content .= '</table>';
+
+        $price_range = '';
+        if (isset($coin['high_24h']) && isset($coin['low_24h']) && (float) $coin['high_24h'] > 0) {
+            $range_pct = (($coin['high_24h'] - $coin['low_24h']) / $coin['high_24h']) * 100;
+            $price_range = number_format($range_pct, 2);
+        }
+
+        $market_cap_millions = number_format($coin['market_cap'] / 1000000, 2);
+        $volume_millions = number_format($coin['total_volume'] / 1000000, 2);
+
+        $content .= '<h3>🧾 What the numbers show</h3>';
+        $content .= '<p>According to the latest CoinGecko snapshot, <strong>' . $name . '</strong> is trading at <strong>$' . number_format($price, $price < 1 ? 6 : 2) . '</strong> with a 24-hour move of <strong>' . ($change_24h >= 0 ? '+' : '') . number_format($change_24h, 2) . '%</strong>. Market capitalization is currently around <strong>$' . $market_cap_millions . 'M</strong>, while 24-hour turnover is near <strong>$' . $volume_millions . 'M</strong>. These values are taken directly from exchange-reported market data aggregated by CoinGecko.</p>';
+
+        if ($price_range !== '') {
+            $content .= '<p>Intraday volatility remains important for short-term positioning: the spread between today\'s high and low is approximately <strong>' . $price_range . '%</strong>. A wider spread generally signals higher uncertainty in price discovery, while a tighter spread can indicate consolidation.</p>';
+        }
+
+        $content .= '<p>This publication is intentionally data-driven: no speculative price target is added here. For context, compare this update with previous reports for the same asset and watch whether volume confirms the current direction.</p>';
         $content .= '<p style="color: #666; font-size: 14px;"><em>📅 Published: ' . gmdate('Y-m-d H:i') . ' UTC • Source: CoinGecko</em></p>';
 
         $post_data = array(
@@ -295,9 +313,7 @@ class CryptoNewsAutoPublisherUltimate {
         if ($post_id) {
             update_post_meta($post_id, 'crypto_coin_id', $coin['id']);
             update_post_meta($post_id, 'crypto_price', $price);
-            if (!empty($coin['image'])) {
-                $this->set_featured_image_from_url($post_id, $coin['image'], $name . ' logo');
-            }
+            $this->ensure_featured_image($post_id, $hero_image, $name . ' market image');
             return true;
         }
 
@@ -333,12 +349,16 @@ class CryptoNewsAutoPublisherUltimate {
         $content = $this->build_inline_image('https://images.unsplash.com/photo-1642543492481-44e81e3914a7?auto=format&fit=crop&w=1200&h=675&q=80', 'crypto market dashboard');
         $content .= '<h3>📊 Key Indicators</h3>';
         $content .= '<p>Total market cap: <strong>$' . number_format($total_market_cap, 0, '.', ',') . '</strong><br>24h change: <strong>' . ($market_change_24h >= 0 ? '+' : '') . number_format($market_change_24h, 2) . '%</strong><br>BTC dominance: <strong>' . number_format($btc_dominance, 2) . '%</strong><br>ETH dominance: <strong>' . number_format($eth_dominance, 2) . '%</strong></p>';
+        $content .= '<h3>🌍 Market context</h3>';
+        $content .= '<p>The global crypto market capitalization is currently close to <strong>$' . number_format($total_market_cap / 1000000000000, 2) . ' trillion</strong>. Bitcoin controls roughly <strong>' . number_format($btc_dominance, 2) . '%</strong> of that value, while Ethereum accounts for around <strong>' . number_format($eth_dominance, 2) . '%</strong>. Together, these two networks remain the primary liquidity anchors for the broader market.</p>';
+        $content .= '<p>The 24-hour total-cap move of <strong>' . ($market_change_24h >= 0 ? '+' : '') . number_format($market_change_24h, 2) . '%</strong> provides a broad directional signal, but it should be read alongside volume and sector rotation. A positive total-cap change with stable dominance often indicates broad participation; sharp dominance changes can point to capital rotating between majors and altcoins.</p>';
+        $content .= '<p>This summary is generated from live CoinGecko global metrics without narrative forecasts. Use it as a factual baseline for comparing daily market structure.</p>';
         $content .= '<p style="color: #666; font-size: 14px;"><em>📅 ' . gmdate('Y-m-d H:i') . ' UTC • Source: CoinGecko</em></p>';
 
         $post_id = wp_insert_post(array('post_title' => $title, 'post_content' => $content, 'post_status' => 'publish', 'post_author' => 1, 'post_category' => array($this->get_or_create_category('Cryptocurrency')), 'tags_input' => 'crypto, market overview, market cap, bitcoin dominance, ethereum dominance'));
         if ($post_id) {
             update_post_meta($post_id, 'post_type_crypto', 'market_overview');
-            $this->set_featured_image_from_url($post_id, 'https://images.unsplash.com/photo-1640161704729-cbe966a08476?auto=format&fit=crop&w=1200&h=675&q=80', 'Crypto market overview');
+            $this->ensure_featured_image($post_id, 'https://images.unsplash.com/photo-1642543492481-44e81e3914a7?auto=format&fit=crop&w=1200&h=675&q=80', 'Crypto market overview');
             return 1;
         }
         return 0;
@@ -368,15 +388,27 @@ class CryptoNewsAutoPublisherUltimate {
 
         $hero_btc = !empty($btc_data['image']['large']) ? $btc_data['image']['large'] : 'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?auto=format&fit=crop&w=1200&h=675&q=80';
         $content = $this->build_inline_image($hero_btc, 'Bitcoin visual');
+        $market_cap = isset($btc_data['market_data']['market_cap']['usd']) ? $btc_data['market_data']['market_cap']['usd'] : 0;
+        $volume_24h = isset($btc_data['market_data']['total_volume']['usd']) ? $btc_data['market_data']['total_volume']['usd'] : 0;
+        $circulating_supply = isset($btc_data['market_data']['circulating_supply']) ? $btc_data['market_data']['circulating_supply'] : 0;
+        $ath = isset($btc_data['market_data']['ath']['usd']) ? $btc_data['market_data']['ath']['usd'] : 0;
+        $ath_change = isset($btc_data['market_data']['ath_change_percentage']['usd']) ? $btc_data['market_data']['ath_change_percentage']['usd'] : 0;
+
         $content .= '<p><strong>Price:</strong> $' . number_format($price, 2) . ' • <strong>24h:</strong> ' . ($change_24h >= 0 ? '+' : '') . number_format($change_24h, 2) . '%</p>';
+        $content .= '<h3>₿ Bitcoin market snapshot</h3>';
+        $content .= '<ul>';
+        $content .= '<li><strong>Market cap:</strong> $' . number_format($market_cap, 0, '.', ',') . '</li>';
+        $content .= '<li><strong>24h traded volume:</strong> $' . number_format($volume_24h, 0, '.', ',') . '</li>';
+        $content .= '<li><strong>Circulating supply:</strong> ' . number_format($circulating_supply, 0, '.', ',') . ' BTC</li>';
+        $content .= '<li><strong>All-time high reference:</strong> $' . number_format($ath, 2) . ' (' . number_format($ath_change, 2) . '% from current level)</li>';
+        $content .= '</ul>';
+        $content .= '<p>This report is built from CoinGecko\'s current Bitcoin dataset and focuses on measurable values only. The goal is to provide a reliable daily checkpoint you can compare over time rather than an opinion-based forecast.</p>';
         $content .= '<p style="color: #666; font-size: 14px;"><em>📅 ' . gmdate('Y-m-d H:i') . ' UTC • Source: CoinGecko</em></p>';
 
         $post_id = wp_insert_post(array('post_title' => $title, 'post_content' => $content, 'post_status' => 'publish', 'post_author' => 1, 'post_category' => array($this->get_or_create_category('Bitcoin')), 'tags_input' => 'bitcoin, btc, bitcoin price, crypto analysis, market update'));
         if ($post_id) {
             update_post_meta($post_id, 'post_type_crypto', 'bitcoin_daily');
-            if (!empty($btc_data['image']['large'])) {
-                $this->set_featured_image_from_url($post_id, $btc_data['image']['large'], 'Bitcoin');
-            }
+            $this->ensure_featured_image($post_id, $hero_btc, 'Bitcoin');
             return 1;
         }
         return 0;
@@ -391,17 +423,32 @@ class CryptoNewsAutoPublisherUltimate {
         }
 
         $title = '🎨 NFT Market Update: Current Trends and Leading Collections';
-        $content = $this->build_inline_image('https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&w=1200&h=675&q=80', 'NFT digital art display');
-        $content .= '<p>The NFT sector continues to evolve with digital art, gaming assets, music drops, and sports collectibles.</p>';
+        $hero_nft = 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&w=1200&h=675&q=80';
+        $content = $this->build_inline_image($hero_nft, 'NFT digital art display');
+        $content .= '<p>This update uses a scheduled cadence and is intended as a sector checkpoint for the NFT category.</p>';
+        $content .= '<p>It is published as a neutral summary post so that the homepage keeps a regular NFT section with a visible thumbnail. You can extend this block with verified marketplace metrics (for example, daily volume, sales count, and floor-price movement) if a preferred data provider is connected.</p>';
+        $content .= '<p>No synthetic numbers are inserted in this template. The text is intentionally factual about publication logic and category scope.</p>';
         $content .= '<p style="color: #666; font-size: 14px;"><em>📅 ' . gmdate('Y-m-d') . ' • Sector update</em></p>';
 
         $post_id = wp_insert_post(array('post_title' => $title, 'post_content' => $content, 'post_status' => 'publish', 'post_author' => 1, 'post_category' => array($this->get_or_create_category('NFT')), 'tags_input' => 'nft, digital art, opensea, blur, magic eden, web3'));
         if ($post_id) {
             update_post_meta($post_id, 'post_type_crypto', 'nft_news');
-            $this->set_featured_image_from_url($post_id, 'https://images.unsplash.com/photo-1642052501778-1e04f3f6f6f0?auto=format&fit=crop&w=1200&h=675&q=80', 'NFT market');
+            $this->ensure_featured_image($post_id, $hero_nft, 'NFT market');
             return 1;
         }
         return 0;
+    }
+
+    private function ensure_featured_image($post_id, $image_url, $image_name) {
+        if (has_post_thumbnail($post_id)) {
+            return true;
+        }
+
+        if (empty($image_url)) {
+            return false;
+        }
+
+        return $this->set_featured_image_from_url($post_id, $image_url, $image_name);
     }
 
     // Helper to render a fixed-size inline image in posts
