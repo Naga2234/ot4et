@@ -19,6 +19,7 @@ class CryptoNewsAutoPublisherUltimate {
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
 
         add_action('admin_menu', array($this, 'add_admin_menu'));
+        add_filter('cron_schedules', array($this, 'add_three_hour_schedule'));
 
         // Крон задачи для автоматических постов
         add_action('crypto_hourly_news_event', array($this, 'publish_all_news'));
@@ -28,9 +29,9 @@ class CryptoNewsAutoPublisherUltimate {
     }
 
     public function activate() {
-        // Публикуем новости каждые 3 часа по времени США
+        // Публикуем новости каждые 3 часа
         if (!wp_next_scheduled('crypto_hourly_news_event')) {
-            wp_schedule_event(time(), 'twicedaily', 'crypto_hourly_news_event');
+            wp_schedule_event(time(), 'crypto_every_three_hours', 'crypto_hourly_news_event');
         }
 
         // Публикуем первую партию сразу при активации
@@ -39,6 +40,17 @@ class CryptoNewsAutoPublisherUltimate {
 
     public function deactivate() {
         wp_clear_scheduled_hook('crypto_hourly_news_event');
+    }
+
+    public function add_three_hour_schedule($schedules) {
+        if (!isset($schedules['crypto_every_three_hours'])) {
+            $schedules['crypto_every_three_hours'] = array(
+                'interval' => 3 * HOUR_IN_SECONDS,
+                'display'  => __('Every 3 Hours', 'crypto-news-auto-publisher-ultimate')
+            );
+        }
+
+        return $schedules;
     }
 
     public function add_admin_menu() {
@@ -95,6 +107,7 @@ class CryptoNewsAutoPublisherUltimate {
             <div class="card" style="max-width: 900px; margin-top: 20px; background: #e7f3ff;">
                 <h2>🎯 Ручная публикация</h2>
                 <p>Опубликовать новости прямо сейчас:</p>
+                <?php $manual_publish_nonce = wp_create_nonce('crypto_manual_publish'); ?>
                 <button class="button button-primary button-hero" onclick="publishNow()" style="font-size: 18px; padding: 10px 30px;">
                     🚀 Опубликовать ВСЕ новости СЕЙЧАС
                 </button>
@@ -134,11 +147,18 @@ class CryptoNewsAutoPublisherUltimate {
                 btn.innerHTML = "⏳ Публикуем...";
                 document.getElementById("result").innerHTML = "<div class='notice notice-info'><p>⏳ Загружаем новости и создаем посты...</p></div>";
 
-                jQuery.post(ajaxurl, {action: "manual_publish"}, function(response) {
-                    document.getElementById("result").innerHTML = "<div class='notice notice-success'><p>✅ " + response + "</p></div>";
+                jQuery.post(ajaxurl, {
+                    action: "manual_publish",
+                    nonce: "<?php echo esc_js($manual_publish_nonce); ?>"
+                }, function(response) {
+                    if (response.success) {
+                        document.getElementById("result").innerHTML = "<div class='notice notice-success'><p>✅ " + response.data.message + "</p></div>";
+                        setTimeout(function() { location.reload(); }, 2000);
+                    } else {
+                        document.getElementById("result").innerHTML = "<div class='notice notice-error'><p>❌ " + response.data.message + "</p></div>";
+                    }
                     btn.disabled = false;
                     btn.innerHTML = "🚀 Опубликовать ВСЕ новости СЕЙЧАС";
-                    setTimeout(function() { location.reload(); }, 2000);
                 }).fail(function() {
                     document.getElementById("result").innerHTML = "<div class='notice notice-error'><p>❌ Ошибка при публикации</p></div>";
                     btn.disabled = false;
@@ -432,15 +452,25 @@ class CryptoNewsAutoPublisherUltimate {
 
     // AJAX обработчики
     public function manual_publish() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Недостаточно прав для запуска публикации.'), 403);
+        }
+
+        check_ajax_referer('crypto_manual_publish', 'nonce');
+
         $total = $this->publish_all_news();
-        echo 'Успешно опубликовано постов: ' . $total . '! Перезагружаем страницу...';
-        wp_die();
+        wp_send_json_success(array('message' => 'Успешно опубликовано постов: ' . $total . '! Перезагружаем страницу...'));
     }
 
     public function test_price_news() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Недостаточно прав для запуска теста.'), 403);
+        }
+
+        check_ajax_referer('crypto_manual_publish', 'nonce');
+
         $result = $this->publish_price_updates();
-        echo 'Создано постов о ценах: ' . $result;
-        wp_die();
+        wp_send_json_success(array('message' => 'Создано постов о ценах: ' . $result));
     }
 }
 
