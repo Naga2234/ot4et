@@ -111,7 +111,7 @@ class CryptoNewsAutoPublisherUltimate {
                 <h2>🎯 Ручная публикация</h2>
                 <p>Опубликовать новости прямо сейчас:</p>
                 <?php $manual_publish_nonce = wp_create_nonce('crypto_manual_publish'); ?>
-                <button class="button button-primary button-hero" onclick="publishNow()" style="font-size: 18px; padding: 10px 30px;">
+                <button class="button button-primary button-hero" onclick="publishNow(this)" style="font-size: 18px; padding: 10px 30px;">
                     🚀 Опубликовать ВСЕ новости СЕЙЧАС
                 </button>
                 <div id="result" style="margin-top: 20px;"></div>
@@ -144,8 +144,7 @@ class CryptoNewsAutoPublisherUltimate {
             </div>
 
             <script>
-            function publishNow() {
-                var btn = event.target;
+            function publishNow(btn) {
                 btn.disabled = true;
                 btn.innerHTML = "⏳ Публикуем...";
                 document.getElementById("result").innerHTML = "<div class='notice notice-info'><p>⏳ Загружаем новости и создаем посты...</p></div>";
